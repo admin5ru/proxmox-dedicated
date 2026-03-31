@@ -1,0 +1,10 @@
+✅ VM создана
+Имя: {{ vm_name }} (ID {{ vm_id }})
+IP: {{ vm_ip | trim }}
+Сеть: {{ vm_network }} ({{ vm_bridge }})
+Ресурсы: {{ vm_cores }} CPU, {{ vm_memory }}MB RAM, {{ vm_disk }}GB disk
+SSH: ssh root@{{ vm_ip | trim }}
+
+Свободных IP:
+Public: {{ free_public | trim }}
+Private: {{ free_private | trim }}

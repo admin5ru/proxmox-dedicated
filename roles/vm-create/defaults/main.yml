@@ -1,0 +1,5 @@
+---
+vm_network: "public"
+vm_cores: 1
+vm_memory: 1024
+vm_disk: 10

@@ -1,0 +1,7 @@
+.venv/
+.vault_password_file
+secrets/*.yml
+!secrets/*example*.yml
+*.retry
+CLAUDE.md
+/docs

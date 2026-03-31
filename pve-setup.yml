@@ -1,0 +1,46 @@
+---
+# Usage:
+#   Full setup (clean Debian):  ansible-playbook pve-setup.yml
+#   Skip PVE install:           ansible-playbook pve-setup.yml --skip-tags install
+#   Only one role:              ansible-playbook pve-setup.yml --tags network
+
+- name: Proxmox VE Setup
+  hosts: proxmox
+  gather_facts: true
+
+  vars_files:
+    - secrets/vault.yml
+
+  roles:
+    - role: pve-install
+      tags: install
+
+    - role: network
+      tags: network
+
+    - role: pve-config
+      tags: pve-config
+
+    - role: cloud-template
+      tags: cloud-template
+
+    - role: monitoring
+      tags: monitoring
+
+  post_tasks:
+    - name: Show summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "Proxmox VE setup complete!"
+          - "============================================"
+          - "Web GUI: https://{{ main_ip }}:8006"
+          - "GUI users: {{ pve_admin_users | map(attribute='name') | join(', ') }}"
+          - "GUI root: DISABLED"
+          - "SSH: ssh root@{{ main_ip }}"
+          - "Public bridge: {{ public_bridge }} ({{ public_subnet }})"
+          - "NAT bridge: {{ nat_bridge }} ({{ nat_subnet }})"
+          - "Cloud-init template: VM {{ template_vmid }} ({{ template_name }})"
+          - "SMTP: {{ smtp_host }} ({{ smtp_user }})"
+          - "============================================"
+      tags: always

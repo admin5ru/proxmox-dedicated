@@ -1,0 +1,115 @@
+---
+- name: Set network vars
+  ansible.builtin.set_fact:
+    vm_gateway: "{{ ansible_facts.default_ipv4.address }}"
+    vm_bridge: "{{ public_bridge if vm_network == 'public' else nat_bridge }}"
+    vm_subnet: "{{ public_subnet if vm_network == 'public' else nat_subnet }}"
+    vm_gw: "{{ ansible_facts.default_ipv4.address if vm_network == 'public' else nat_gateway }}"
+    vm_prefix: "{{ '/32' if vm_network == 'public' else '/24' }}"
+
+- name: Check that VM does not already exist
+  ansible.builtin.command: qm status {{ vm_id }}
+  register: vm_check
+  failed_when: vm_check.rc == 0
+  changed_when: false
+
+- name: Collect IPs from all existing VMs
+  ansible.builtin.shell: >
+    qm list | awk 'NR>1 {print $1}' | xargs -I{} qm config {} 2>/dev/null | grep -oP 'ip=\K[0-9.]+' || true
+  register: used_ips
+  changed_when: false
+
+- name: Find free IP in subnet
+  ansible.builtin.set_fact:
+    vm_ip: >-
+      {% if vm_network == 'public' %}
+      {%   set net = public_subnet.split('/')[0].split('.') %}
+      {%   set base = net[0] ~ '.' ~ net[1] ~ '.' ~ net[2] ~ '.' %}
+      {%   set start = net[3] | int + 1 %}
+      {%   set candidates = [] %}
+      {%   for i in range(start, start + 6) %}
+      {%     set _ = candidates.append(base ~ i | string) %}
+      {%   endfor %}
+      {% else %}
+      {%   set candidates = [] %}
+      {%   for i in range(2, 254) %}
+      {%     set _ = candidates.append('10.10.10.' ~ i | string) %}
+      {%   endfor %}
+      {% endif %}
+      {{ (candidates | reject('in', used_ips.stdout_lines) | list)[0] | default('') }}
+
+- name: Fail if no free IP available
+  ansible.builtin.fail:
+    msg: "No free IP in {{ vm_subnet }}"
+  when: vm_ip | trim == ''
+
+- name: Clone template
+  ansible.builtin.command: >
+    qm clone {{ template_vmid }} {{ vm_id }}
+    --name {{ vm_name }}
+    --full
+
+- name: Write temporary SSH key file for cloud-init
+  ansible.builtin.copy:
+    dest: "/tmp/vm-{{ vm_id }}-sshkeys"
+    content: "{{ vm_ssh_key }}\n"
+    mode: "0600"
+
+- name: Configure VM resources and network
+  ansible.builtin.command: >
+    qm set {{ vm_id }}
+    --cores {{ vm_cores }}
+    --memory {{ vm_memory }}
+    --net0 virtio,bridge={{ vm_bridge }}
+    --ipconfig0 ip={{ vm_ip | trim }}{{ vm_prefix }},gw={{ vm_gw }}
+    --sshkeys /tmp/vm-{{ vm_id }}-sshkeys
+
+- name: Remove temporary SSH key file
+  ansible.builtin.file:
+    path: "/tmp/vm-{{ vm_id }}-sshkeys"
+    state: absent
+
+- name: Resize disk
+  ansible.builtin.command: >
+    qm resize {{ vm_id }} scsi0 +{{ vm_disk }}G
+
+- name: Start VM
+  ansible.builtin.command: qm start {{ vm_id }}
+
+- name: Count free IPs
+  ansible.builtin.set_fact:
+    free_public: >-
+      {% set net = public_subnet.split('/')[0].split('.') %}
+      {% set base = net[0] ~ '.' ~ net[1] ~ '.' ~ net[2] ~ '.' %}
+      {% set start = net[3] | int + 1 %}
+      {% set candidates = [] %}
+      {% for i in range(start, start + 6) %}
+      {%   set _ = candidates.append(base ~ i | string) %}
+      {% endfor %}
+      {{ candidates | reject('in', used_ips.stdout_lines) | list | length }}
+    free_private: >-
+      {% set candidates = [] %}
+      {% for i in range(2, 254) %}
+      {%   set _ = candidates.append('10.10.10.' ~ i | string) %}
+      {% endfor %}
+      {{ candidates | reject('in', used_ips.stdout_lines) | list | length }}
+
+- name: Send Telegram notification
+  ansible.builtin.uri:
+    url: "https://api.telegram.org/bot{{ telegram_bot_token }}/sendMessage"
+    method: POST
+    body_format: json
+    body:
+      chat_id: "{{ telegram_chat_id }}"
+      text: "{{ lookup('template', 'vm-telegram.j2') }}"
+
+- name: Show VM info
+  ansible.builtin.debug:
+    msg:
+      - "VM {{ vm_name }} (ID {{ vm_id }}) created"
+      - "IP: {{ vm_ip | trim }}"
+      - "Network: {{ vm_network }} ({{ vm_bridge }})"
+      - "Resources: {{ vm_cores }} cores, {{ vm_memory }}MB RAM, +{{ vm_disk }}GB disk"
+      - "SSH: ssh root@{{ vm_ip | trim }}"
+      - "Free public IPs: {{ free_public | trim }}"
+      - "Free private IPs: {{ free_private | trim }}"

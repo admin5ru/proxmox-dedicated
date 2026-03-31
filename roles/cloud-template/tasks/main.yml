@@ -1,0 +1,81 @@
+---
+- name: Download Ubuntu cloud image
+  ansible.builtin.get_url:
+    url: "{{ cloud_image_url }}"
+    dest: "/var/lib/vz/template/iso/noble-server-cloudimg-amd64.img"
+    mode: "0644"
+
+- name: Check if template VM already exists
+  ansible.builtin.command: qm status {{ template_vmid }}
+  register: template_exists
+  failed_when: false
+  changed_when: false
+
+- name: Check if VM is already a template
+  ansible.builtin.shell: qm config {{ template_vmid }} 2>/dev/null | grep -q '^template:\ 1'
+  register: is_template
+  failed_when: false
+  changed_when: false
+
+- name: Remove incomplete VM (exists but not a template)
+  ansible.builtin.command: qm destroy {{ template_vmid }} --purge
+  when:
+    - template_exists.rc == 0
+    - is_template.rc != 0
+  changed_when: true
+
+- name: Ensure snippets directory exists
+  ansible.builtin.file:
+    path: /var/lib/vz/snippets
+    state: directory
+    mode: "0755"
+
+- name: Create vendor-data snippet for cloud-init
+  ansible.builtin.template:
+    src: vendor-data.yml.j2
+    dest: /var/lib/vz/snippets/vendor-data.yml
+    mode: "0644"
+
+- name: Create cloud-init template VM
+  when: template_exists.rc != 0 or is_template.rc != 0
+  block:
+    - name: Create VM
+      ansible.builtin.command: >
+        qm create {{ template_vmid }}
+        --name {{ template_name }}
+        --memory 1024
+        --cores 1
+        --net0 virtio,bridge={{ nat_bridge }}
+        --ciuser root
+        --nameserver 8.8.8.8
+        --agent enabled=1
+        --ostype l26
+
+    - name: Import cloud image as disk
+      ansible.builtin.command: >
+        qm importdisk {{ template_vmid }}
+        /var/lib/vz/template/iso/noble-server-cloudimg-amd64.img
+        {{ template_storage }}
+      register: importdisk_result
+
+    - name: Extract imported disk name
+      ansible.builtin.set_fact:
+        imported_disk: "{{ importdisk_result.stdout | regex_search('(local\\S+:vm-\\d+-disk-\\d+)') }}"
+
+    - name: Attach disk to VM
+      ansible.builtin.command: >
+        qm set {{ template_vmid }}
+        --scsihw virtio-scsi-single
+        --scsi0 {{ imported_disk }}
+
+    - name: Configure boot and cloud-init drive
+      ansible.builtin.command: >
+        qm set {{ template_vmid }}
+        --boot order=scsi0
+        --ide2 {{ template_storage }}:cloudinit
+        --serial0 socket
+        --vga serial0
+        --cicustom "vendor=local:snippets/vendor-data.yml"
+
+    - name: Convert to template
+      ansible.builtin.command: qm template {{ template_vmid }}

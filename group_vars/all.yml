@@ -1,0 +1,44 @@
+---
+# ---- Network ----
+main_interface: "{{ ansible_facts.default_ipv4.interface }}"
+main_ip: "{{ ansible_facts.default_ipv4.address }}"
+
+# Public bridge — routed VMs
+public_bridge: "vmbr0"
+public_subnet: "{{ vault_public_subnet }}"
+
+# NAT bridge — private VMs (10.10.10.0/24)
+nat_bridge: "vmbr1"
+nat_subnet: "10.10.10.0/24"
+nat_gateway: "10.10.10.1"
+
+# ---- SSH ----
+ssh_port: 22
+
+# ---- Firewall ----
+admin_ip: "0.0.0.0/0" # GUI открыт, защищён паролем. Если появится VPN — ограничь.
+
+# ---- Proxmox GUI users (из vault.yml) ----
+pve_admin_users: "{{ vault_pve_admin_users }}"
+
+# ---- Cloud-init template ----
+cloud_image_url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+template_vmid: 9000
+template_name: "ubuntu-2404-cloud"
+template_storage: "local-lvm"
+
+# ---- Notifications ----
+# SMTP — Proxmox email alerts
+alert_email: "{{ vault_alert_email }}"
+smtp_host: "{{ vault_smtp_host }}"
+smtp_port: "{{ vault_smtp_port }}"
+smtp_user: "{{ vault_smtp_user }}"
+smtp_password: "{{ vault_smtp_password }}"
+
+# Telegram
+telegram_bot_token: "{{ vault_telegram_bot_token }}"
+telegram_chat_id: "{{ vault_telegram_chat_id }}"
+
+# ---- Monitoring thresholds (%) ----
+ram_threshold: 85
+disk_threshold: 80

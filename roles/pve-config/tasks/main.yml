@@ -1,0 +1,67 @@
+---
+- name: Disable enterprise repository (.list)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.list
+    state: absent
+
+- name: Disable enterprise repository (.sources)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.sources
+    state: absent
+
+- name: Remove old pve.list (duplicate of pve-no-subscription)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve.list
+    state: absent
+
+- name: Ensure no-subscription repo exists
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pve-no-subscription.list
+    mode: "0644"
+    content: |
+      deb [arch=amd64] http://download.proxmox.com/debian/pve {{ ansible_facts.distribution_release }} pve-no-subscription
+  register: pve_repo
+
+- name: Update apt cache after repo change
+  ansible.builtin.apt:
+    update_cache: true
+  when: pve_repo.changed
+
+# ---- Admin users ----
+
+- name: Create Linux users for Proxmox GUI
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    password: "{{ item.password | password_hash('sha512', 'pvesalt0') }}"
+    shell: /bin/bash
+    create_home: true
+    update_password: on_create
+  loop: "{{ pve_admin_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Get existing Proxmox users
+  ansible.builtin.command: pveum user list --output-format json
+  register: pve_user_list
+  changed_when: false
+
+- name: Add users to Proxmox VE
+  ansible.builtin.command: pveum user add {{ item.name }}@pam
+  when: item.name ~ '@pam' not in pve_user_list.stdout
+  changed_when: true
+  loop: "{{ pve_admin_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Grant roles to users
+  ansible.builtin.command: pveum acl modify / --roles {{ item.role }} --users {{ item.name }}@pam
+  changed_when: false
+  loop: "{{ pve_admin_users }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.role }}"
+
+# ---- Disable root GUI access ----
+
+- name: Disable root in Proxmox GUI
+  ansible.builtin.command: pveum user modify root@pam --enable 0
+  changed_when: false

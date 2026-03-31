@@ -1,0 +1,133 @@
+---
+# ---- Hostname resolution ----
+
+- name: Set short hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Ensure 127.0.0.1 points only to localhost
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.0\.1'
+    line: "127.0.0.1 localhost"
+
+- name: Configure /etc/hosts with FQDN
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^{{ ansible_facts.default_ipv4.address }}'
+    line: "{{ ansible_facts.default_ipv4.address }} {{ inventory_hostname }}.{{ pve_domain }} {{ inventory_hostname }}"
+
+- name: Verify hostname resolves to real IP
+  ansible.builtin.command: hostname --ip-address
+  register: hostname_ip
+  changed_when: false
+
+- name: Fail if hostname resolves to loopback
+  ansible.builtin.fail:
+    msg: "hostname --ip-address returned {{ hostname_ip.stdout }}, expected {{ ansible_facts.default_ipv4.address }}"
+  when: hostname_ip.stdout is search('127\.')
+
+# ---- Proxmox repository ----
+
+- name: Download Proxmox GPG key
+  ansible.builtin.get_url:
+    url: "https://enterprise.proxmox.com/debian/proxmox-release-{{ ansible_facts.distribution_release }}.gpg"
+    dest: "/etc/apt/trusted.gpg.d/proxmox-release-{{ ansible_facts.distribution_release }}.gpg"
+    mode: "0644"
+
+- name: Add PVE no-subscription repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pve-no-subscription.list
+    mode: "0644"
+    content: |
+      deb [arch=amd64] http://download.proxmox.com/debian/pve {{ ansible_facts.distribution_release }} pve-no-subscription
+
+- name: Full system upgrade
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: full
+
+# ---- Install Proxmox VE ----
+
+- name: Install Proxmox VE and dependencies
+  ansible.builtin.apt:
+    name:
+      - proxmox-ve
+      - open-iscsi
+      - chrony
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Check current kernel
+  ansible.builtin.command: uname -r
+  register: kernel_version
+  changed_when: false
+
+- name: Reboot into PVE kernel
+  ansible.builtin.reboot:
+    reboot_timeout: 420
+  when: "'pve' not in kernel_version.stdout"
+
+# ---- Remove stock Debian kernel (after reboot into PVE) ----
+
+- name: Find stock Debian kernels
+  ansible.builtin.shell: dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | grep -v pve
+  register: stock_kernels
+  changed_when: false
+  failed_when: false
+
+- name: Remove stock Debian kernels
+  ansible.builtin.apt:
+    name: "{{ stock_kernels.stdout_lines }}"
+    state: absent
+    purge: true
+  when: stock_kernels.stdout_lines | length > 0
+  notify: Update GRUB
+
+- name: Remove os-prober
+  ansible.builtin.apt:
+    name: os-prober
+    state: absent
+    purge: true
+
+- name: Autoremove unused packages
+  ansible.builtin.apt:
+    autoremove: true
+
+- name: Flush handlers after cleanup
+  ansible.builtin.meta: flush_handlers
+
+# ---- LVM thin pool for VM disks ----
+
+- name: Install LVM tools
+  ansible.builtin.apt:
+    name: lvm2
+    state: present
+
+- name: Check if thin pool already exists
+  ansible.builtin.command: lvs vg0/data --noheadings
+  register: thinpool_check
+  failed_when: false
+  changed_when: false
+
+- name: Create LVM thin pool for VM storage
+  ansible.builtin.command: >
+    lvcreate -l 100%FREE -T vg0/data
+  when: thinpool_check.rc != 0
+  changed_when: true
+
+- name: Check if Proxmox storage local-lvm exists
+  ansible.builtin.command: pvesm status --storage local-lvm
+  register: storage_check
+  failed_when: false
+  changed_when: false
+
+- name: Add local-lvm storage to Proxmox
+  ansible.builtin.command: >
+    pvesm add lvmthin local-lvm
+    --vgname vg0
+    --thinpool data
+    --content rootdir,images
+  when: storage_check.rc != 0
+  changed_when: true

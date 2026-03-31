@@ -1,0 +1,11 @@
+---
+# Copy to host_vars/<your-hostname>.yml and encrypt:
+#   ansible-vault encrypt host_vars/<your-hostname>.yml
+
+ansible_host: 192.0.2.1
+ansible_user: root
+ansible_ssh_private_key_file: ~/.ssh/your-key
+ansible_ssh_extra_args: "-o PreferredAuthentications=publickey"
+ansible_python_interpreter: /usr/bin/python3
+
+pve_domain: "local"

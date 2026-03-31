@@ -1,0 +1,34 @@
+# Managed by Ansible
+
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+iface lo inet6 loopback
+
+auto {{ main_interface }}
+iface {{ main_interface }} inet static
+        address {{ main_ip }}/32
+        gateway {{ ansible_facts.default_ipv4.gateway }}
+        pointopoint {{ ansible_facts.default_ipv4.gateway }}
+
+iface {{ main_interface }} inet6 static
+        address {{ ansible_facts.default_ipv6.address }}
+        netmask {{ ansible_facts.default_ipv6.prefix }}
+        gateway {{ ansible_facts.default_ipv6.gateway }}
+
+auto {{ public_bridge }}
+iface {{ public_bridge }} inet static
+        address {{ main_ip }}/32
+        bridge-ports none
+        bridge-stp off
+        bridge-fd 0
+        post-up ip route add {{ public_subnet }} dev {{ public_bridge }}
+        post-down ip route del {{ public_subnet }} dev {{ public_bridge }}
+
+auto {{ nat_bridge }}
+iface {{ nat_bridge }} inet static
+        address {{ nat_gateway }}/24
+        bridge-ports none
+        bridge-stp off
+        bridge-fd 0

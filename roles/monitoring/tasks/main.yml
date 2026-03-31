@@ -1,0 +1,79 @@
+---
+# ---- Email (msmtp) ----
+
+- name: Install msmtp for email alerts
+  ansible.builtin.apt:
+    name:
+      - msmtp
+      - msmtp-mta
+      - mailutils
+    state: present
+
+- name: Configure msmtp
+  ansible.builtin.copy:
+    dest: /etc/msmtprc
+    mode: "0600"
+    content: |
+      defaults
+      auth           on
+      tls            on
+      tls_starttls   on
+      tls_trust_file /etc/ssl/certs/ca-certificates.crt
+      logfile        /var/log/msmtp.log
+
+      account        default
+      host           {{ smtp_host }}
+      port           {{ smtp_port }}
+      from           {{ smtp_user }}
+      user           {{ smtp_user }}
+      password       {{ smtp_password }}
+
+# ---- Telegram notify script ----
+
+- name: Create Telegram notify script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/notify_telegram.sh
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      # Usage: notify_telegram.sh "message text"
+      MESSAGE="$1"
+      curl -s -X POST "https://api.telegram.org/bot{{ telegram_bot_token }}/sendMessage" \
+        -d chat_id="{{ telegram_chat_id }}" \
+        -d text="$MESSAGE" \
+        -d parse_mode="HTML" > /dev/null
+
+# ---- Resource check script ----
+
+- name: Create resource check script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/check_resources.sh
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      RAM_USAGE=$(free | awk '/Mem/{printf("%.0f"), $3/$2 * 100}')
+      DISK_USAGE=$(df / | awk 'NR==2{print $5}' | tr -d '%')
+      CPU_LOAD=$(uptime | awk -F'load average:' '{print $2}' | cut -d, -f1 | xargs)
+      VM_COUNT=$(qm list 2>/dev/null | tail -n +2 | wc -l)
+
+      if [ "$RAM_USAGE" -gt {{ ram_threshold }} ] || [ "$DISK_USAGE" -gt {{ disk_threshold }} ]; then
+          ALERT="⚠️ <b>ALERT on $(hostname)</b>
+
+      RAM: ${RAM_USAGE}%
+      Disk: ${DISK_USAGE}%
+      Load: ${CPU_LOAD}
+      VMs: ${VM_COUNT}"
+
+          # Telegram
+          /usr/local/bin/notify_telegram.sh "$ALERT"
+
+          # Email
+          echo -e "RAM: ${RAM_USAGE}%\nDisk: ${DISK_USAGE}%\nLoad: ${CPU_LOAD}\nVMs running: ${VM_COUNT}" | \
+          mail -s "[PROXMOX ALERT] Resource threshold exceeded" {{ alert_email }}
+      fi
+
+- name: Setup cron for resource monitoring (every 5 min)
+  ansible.builtin.cron:
+    name: "Proxmox resource check"
+    minute: "*/5"
+    job: "/usr/local/bin/check_resources.sh"

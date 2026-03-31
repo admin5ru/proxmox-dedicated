@@ -1,0 +1,57 @@
+#!/usr/sbin/nft -f
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        ct state established,related accept
+        iif lo accept
+
+        # ICMP
+        icmp type echo-request accept
+        icmpv6 type { echo-request, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept
+
+        # SSH
+        tcp dport {{ ssh_port }} accept
+
+        # Proxmox GUI
+        tcp dport 8006 ip saddr {{ admin_ip }} accept
+
+        # VNC console
+        tcp dport 5900-5999 ip saddr {{ admin_ip }} accept
+
+        # VM bridges
+        iifname "{{ nat_bridge }}" accept
+        iifname "{{ public_bridge }}" accept
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy accept;
+
+        iifname "{{ nat_bridge }}" accept
+        oifname "{{ nat_bridge }}" ct state established,related accept
+
+        iifname "{{ public_bridge }}" accept
+        oifname "{{ public_bridge }}" accept
+    }
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+
+table inet nat {
+    chain postrouting {
+        type nat hook postrouting priority 100; policy accept;
+        ip saddr {{ nat_subnet }} oifname "{{ main_interface }}" masquerade
+    }
+}
+
+# Conntrack zone fix: prevents NAT + PVE firewall from blocking VM outbound traffic
+table inet raw {
+    chain prerouting {
+        type filter hook prerouting priority raw; policy accept;
+        iifname "fwbr*" ct zone set 1
+    }
+}
