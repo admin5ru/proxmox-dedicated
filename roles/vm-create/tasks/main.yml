@@ -25,9 +25,11 @@
       {% if vm_network == 'public' %}
       {%   set net = public_subnet.split('/')[0].split('.') %}
       {%   set base = net[0] ~ '.' ~ net[1] ~ '.' ~ net[2] ~ '.' %}
-      {%   set start = net[3] | int + 1 %}
+      {%   set prefix = public_subnet.split('/')[1] | int %}
+      {%   set size = 2 ** (32 - prefix) %}
+      {%   set net_start = net[3] | int %}
       {%   set candidates = [] %}
-      {%   for i in range(start, start + 6) %}
+      {%   for i in range(net_start + 1, net_start + size - 1) %}
       {%     set _ = candidates.append(base ~ i | string) %}
       {%   endfor %}
       {% else %}
@@ -76,14 +78,22 @@
 - name: Start VM
   ansible.builtin.command: qm start {{ vm_id }}
 
+- name: Refresh used IPs after VM creation
+  ansible.builtin.shell: >
+    qm list | awk 'NR>1 {print $1}' | xargs -I{} qm config {} 2>/dev/null | grep -oP 'ip=\K[0-9.]+' || true
+  register: used_ips
+  changed_when: false
+
 - name: Count free IPs
   ansible.builtin.set_fact:
     free_public: >-
       {% set net = public_subnet.split('/')[0].split('.') %}
       {% set base = net[0] ~ '.' ~ net[1] ~ '.' ~ net[2] ~ '.' %}
-      {% set start = net[3] | int + 1 %}
+      {% set prefix = public_subnet.split('/')[1] | int %}
+      {% set size = 2 ** (32 - prefix) %}
+      {% set net_start = net[3] | int %}
       {% set candidates = [] %}
-      {% for i in range(start, start + 6) %}
+      {% for i in range(net_start + 1, net_start + size - 1) %}
       {%   set _ = candidates.append(base ~ i | string) %}
       {% endfor %}
       {{ candidates | reject('in', used_ips.stdout_lines) | list | length }}
