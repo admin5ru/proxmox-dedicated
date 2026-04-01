@@ -47,7 +47,7 @@
         --cores 1
         --net0 virtio,bridge={{ nat_bridge }}
         --ciuser root
-        --nameserver 8.8.8.8
+        --nameserver {{ dns_servers | join(',') }}
         --agent enabled=1
         --ostype l26
 
