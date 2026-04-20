@@ -4,7 +4,7 @@
 # Private VM: ansible-playbook vm-create.yml -e "vm_id=201 vm_name=client-001 vm_network=private vm_ssh_key='ssh-ed25519 AAAA...'"
 
 - name: Create VM
-  hosts: "{{ vm_host | default('adm5het1') }}"
+  hosts: "{{ vm_host | default('nvx-pve1-hel') }}"
   gather_facts: true
   vars_files:
     - secrets/vault.yml
