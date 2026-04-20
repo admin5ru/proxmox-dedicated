@@ -60,6 +60,7 @@
 - name: Configure VM resources and network
   ansible.builtin.command: >
     qm set {{ vm_id }}
+    --onboot 1
     --cores {{ vm_cores }}
     --memory {{ vm_memory }}
     --net0 virtio,bridge={{ vm_bridge }}
