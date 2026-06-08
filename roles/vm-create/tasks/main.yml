@@ -74,7 +74,7 @@
 
 - name: Resize disk
   ansible.builtin.command: >
-    qm resize {{ vm_id }} scsi0 +{{ vm_disk }}G
+    qm resize {{ vm_id }} scsi0 {{ vm_disk }}G
 
 - name: Start VM
   ansible.builtin.command: qm start {{ vm_id }}
@@ -120,7 +120,7 @@
       - "VM {{ vm_name }} (ID {{ vm_id }}) created"
       - "IP: {{ vm_ip | trim }}"
       - "Network: {{ vm_network }} ({{ vm_bridge }})"
-      - "Resources: {{ vm_cores }} cores, {{ vm_memory }}MB RAM, +{{ vm_disk }}GB disk"
+      - "Resources: {{ vm_cores }} cores, {{ vm_memory }}MB RAM, {{ vm_disk }}GB disk"
       - "SSH: ssh root@{{ vm_ip | trim }}"
       - "Free public IPs: {{ free_public | trim }}"
       - "Free private IPs: {{ free_private | trim }}"
